@@ -53,8 +53,10 @@ def test_mock_plots_and_values(window: DaqWindow) -> None:
             assert np.all((y > 1) & (y < 4))
         assert channel.unit in window.values[channel.name].text()
         assert "--" not in window.values[channel.name].text()
-    assert {button.text() for button in window.findChildren(QPushButton)} == {
-        "Connect", "Start Recording", "Stop Recording",
+    assert {button.text().split(":")[0] for button in window.findChildren(QPushButton)} == {
+        "Connect", "Start Recording", "Stop Recording", "EMERGENCY ABORT", "Reset Abort",
+        "IDLE", "FILLING", "PRESSURIZATION", "READY", "TEST", "SAFE", "ABORT",
+        "LOX Dump", "Fuel Dump", "LOX Fill", "LOX Run", "Fuel Run", "LOX Vent", "Fuel Vent",
     }
 
 

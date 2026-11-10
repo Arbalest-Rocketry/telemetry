@@ -1,6 +1,7 @@
 import argparse
 from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from math import isfinite
 from pathlib import Path
 from queue import Empty, Full, Queue
@@ -17,6 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from daq.acquire.mock import MockSource
+from daq.control.config import ControlConfig
+from daq.control.fake_plc import FakePlc
+from daq.control.plc import ValveClient
+from daq.control.state import ControlError, Controller, State, Valve
+from daq.control.supervisor import AbortSupervisor
 from daq.live.client import LiveClient
 from daq.live.downsample import Downsampler
 from daq.live.websocket import WebSocketClient
@@ -30,6 +36,7 @@ class Acquisition:
     out: Path
     ingest_url: str
     live_transport: str = "ws"
+    supervisor: AbortSupervisor | None = None
     samples: Queue[tuple[Reading, ...]] = field(default_factory=lambda: Queue(maxsize=8))
     messages: Queue[tuple[str, str]] = field(default_factory=Queue)
     commands: Queue[str] = field(default_factory=Queue)
@@ -53,6 +60,9 @@ class Acquisition:
                     command = self.commands.get_nowait()
                 except Empty:
                     command = ""
+                # Before the logger, so a slow disk can't hold up the abort check.
+                if self.supervisor is not None:
+                    self.supervisor.offer(scan)
                 if command == "start" and logger is None:
                     run_id = uuid4().hex
                     if live is not None:
@@ -97,11 +107,20 @@ class Acquisition:
 class DaqWindow(QMainWindow):
     def __init__(
         self, *, mock: bool = False, out: Path = Path("data/runs"), ingest_url: str = "",
+        config: ControlConfig = ControlConfig(),
     ) -> None:
         super().__init__()
         self.mock = mock
         self.out = out
         self.acquisition: Acquisition | None = None
+        self.supervisor: AbortSupervisor | None = None
+        self.plc: FakePlc | None = None
+        if mock:
+            self.plc = FakePlc()
+            self.plc.start()
+            config = replace(config, plc_host=self.plc.host, plc_port=self.plc.port)
+        self.valve_client = ValveClient(config)
+        self.controller = Controller(config, send=self.valve_client.set_mask)
         self.setWindowTitle("Arbalest DAQ")
         self.resize(1500, 950)
         self.setStyleSheet("""
@@ -113,6 +132,9 @@ class DaqWindow(QMainWindow):
                                     border-radius: 5px; padding: 9px; }
             QPushButton:hover { background: #26314a; }
             QPushButton:disabled { color: #52607a; }
+            QPushButton:checked { background: #14532d; border-color: #00e676; }
+            QPushButton#abort { background: #b71c1c; font-weight: bold; padding: 14px; }
+            QLabel#alert { color: #ff5252; font-weight: bold; }
         """)
         central = QWidget()
         layout = QHBoxLayout(central)
@@ -155,7 +177,7 @@ class DaqWindow(QMainWindow):
             self.history[channel.name] = deque(maxlen=250)
         main.addLayout(cards)
         main.addLayout(plots, 1)
-        layout.addLayout(main, 4)
+        layout.addLayout(main, 5)
 
         controls = QVBoxLayout()
         controls.addWidget(QLabel("CONNECTION & RECORDING"))
@@ -185,10 +207,101 @@ class DaqWindow(QMainWindow):
         controls.addWidget(QLabel("Pressure: PSI\nLoad cells: V (uncalibrated)\nPlots: 25 Hz / last 10 s"))
         controls.addStretch()
         layout.addLayout(controls, 1)
+        layout.addLayout(self._control_column(), 1)
         self.setCentralWidget(central)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._refresh)
         self.timer.start(40)
+
+    def _control_column(self) -> QVBoxLayout:
+        column = QVBoxLayout()
+        column.addWidget(QLabel("STAND CONTROL"))
+        self.state_label = QLabel()
+        column.addWidget(self.state_label)
+        self.abort_alert = QLabel()
+        self.abort_alert.setObjectName("alert")
+        self.abort_alert.setWordWrap(True)
+        column.addWidget(self.abort_alert)
+        self.abort_button = QPushButton("EMERGENCY ABORT")
+        self.abort_button.setObjectName("abort")
+        self.abort_button.clicked.connect(lambda: self.controller.abort())
+        column.addWidget(self.abort_button)
+        self.reset_button = QPushButton("Reset Abort")
+        self.reset_button.clicked.connect(lambda: self._command(self.controller.reset_abort))
+        column.addWidget(self.reset_button)
+        self.control_message = QLabel()
+        self.control_message.setWordWrap(True)
+        column.addWidget(self.control_message)
+
+        column.addWidget(QLabel("TEST STATE"))
+        self.state_buttons: dict[State, QPushButton] = {}
+        for state in State:
+            button = QPushButton(state.value)
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda _, state=state: self._command(self.controller.change_state, state)
+            )
+            column.addWidget(button)
+            self.state_buttons[state] = button
+
+        column.addWidget(QLabel("VALVES (commanded / PLC readback)"))
+        self.valve_buttons: dict[Valve, QPushButton] = {}
+        self.valve_confirmed: dict[Valve, QLabel] = {}
+        for valve in Valve:
+            row = QHBoxLayout()
+            button = QPushButton()
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda _, valve=valve: self._command(self.controller.toggle, valve)
+            )
+            row.addWidget(button, 1)
+            confirmed = QLabel()
+            row.addWidget(confirmed)
+            column.addLayout(row)
+            self.valve_buttons[valve] = button
+            self.valve_confirmed[valve] = confirmed
+        self.plc_status = QLabel()
+        self.plc_status.setWordWrap(True)
+        column.addWidget(self.plc_status)
+        column.addStretch()
+        self._refresh_control()
+        return column
+
+    def _command(self, action: Callable[..., None], *args: object) -> None:
+        try:
+            action(*args)
+        except ControlError as error:
+            self.control_message.setText(str(error))
+        else:
+            self.control_message.setText("")
+
+    def _refresh_control(self) -> None:
+        controller = self.controller
+        state = controller.state
+        commanded = controller.valves
+        confirmed = self.valve_client.confirmed
+        self.state_label.setText(f"State: {state.value}")
+        aborted = state is State.ABORT
+        self.abort_alert.setText(f"ABORT: {controller.abort_reason}" if aborted else "")
+        self.reset_button.setEnabled(aborted)
+        for button_state, button in self.state_buttons.items():
+            button.setChecked(button_state is state)
+        for valve in Valve:
+            name = " ".join(w if w == "LOX" else w.title() for w in valve.name.split("_"))
+            is_open = commanded[valve]
+            self.valve_buttons[valve].setChecked(is_open)
+            self.valve_buttons[valve].setText(f"{name}: {'OPEN' if is_open else 'CLOSED'}")
+            label = self.valve_confirmed[valve]
+            if confirmed is None:
+                text = "PLC ?"
+            else:
+                text = f"PLC {'OPEN' if confirmed[valve] else 'CLOSED'}"
+            matches = confirmed is not None and confirmed[valve] == is_open
+            style = f"color: {'#00e676' if matches else '#ffab00'}"
+            label.setText(text)
+            if label.styleSheet() != style:
+                label.setStyleSheet(style)
+        self.plc_status.setText(self.valve_client.status)
 
     def connect_source(self) -> None:
         if self.acquisition is not None:
@@ -196,10 +309,12 @@ class DaqWindow(QMainWindow):
         if not self.mock:
             self.status.setText("No hardware adapter yet. Launch with --mock.")
             return
+        self.supervisor = AbortSupervisor(self.controller)
         self.acquisition = Acquisition(
             MockSource(), self.out, self.ingest_url.text().strip(),
-            self.live_transport.currentText(),
+            self.live_transport.currentText(), self.supervisor,
         )
+        self.supervisor.start()
         self.acquisition.thread.start()
         self.connect_button.setEnabled(False)
         self.ingest_url.setEnabled(False)
@@ -220,6 +335,7 @@ class DaqWindow(QMainWindow):
             self.acquisition.commands.put("stop")
 
     def _refresh(self) -> None:
+        self._refresh_control()
         acquisition = self.acquisition
         if acquisition is None:
             return
@@ -257,9 +373,15 @@ class DaqWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.timer.stop()
+        # Supervisor first, or the acquisition winding down reads as stale PTs.
+        if self.supervisor is not None:
+            self.supervisor.close()
         if self.acquisition is not None:
             self.acquisition.stop.set()
             self.acquisition.thread.join()
+        self.valve_client.close()
+        if self.plc is not None:
+            self.plc.stop()
         event.accept()
 
 
