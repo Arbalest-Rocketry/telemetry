@@ -64,3 +64,11 @@ For a local mock recording, I run:
 It prints the run folder with `raw.csv` and `meta.json`. Each CSV row has `t_s`,
 `timestamp_utc`, and raw volts for all 11 channels at 1 kHz. Ctrl+C flushes the
 remaining samples before closing the log.
+
+For live monitoring, I add `--ingest-url http://localhost:8000 --live-rate-hz 25`.
+It posts averaged scans to `/ingest` in batches of five. Whole scan windows keep
+the live rate at or below the requested rate; timestamps mark the window midpoint.
+A missing reading makes that channel's window `null`. Incomplete windows are
+discarded at the end. Pressure is sent in PSI; uncalibrated channels stay in volts.
+The sender drops batches if its queue fills or a request fails, and gives pending
+batches 0.6 s to finish on shutdown. The full-rate disk log keeps going either way.
