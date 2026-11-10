@@ -3,4 +3,4 @@ name = "telemetry"
 version = "0.0.0"
 description = "Unified telemetry pipeline: ingest, storage and dashboards."
 requires-python = ">=3.11"
-dependencies = ["httpx", "PySide6", "pyqtgraph", "numpy", "fastapi", "uvicorn", "websockets"]
+dependencies = ["httpx", "PySide6", "pyqtgraph", "numpy", "fastapi", "uvicorn", "websockets", "pymodbus"]
