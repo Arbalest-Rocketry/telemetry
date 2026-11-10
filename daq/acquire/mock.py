@@ -15,6 +15,7 @@ from daq.models import CHANNELS, PRESSURE_CHANNELS, Reading
 class MockSource:
     seed: int | None = None
     start_utc: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # 1 kHz matches the PT2400's ~1 ms response and the logger's full-rate target.
     sample_rate_hz: ClassVar[int] = 1000
     _random: Random = field(init=False, repr=False)
     _scan_index: int = field(default=0, init=False, repr=False)

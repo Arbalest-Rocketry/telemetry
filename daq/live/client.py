@@ -55,6 +55,7 @@ class LiveClient:
             try:
                 self._queue.put_nowait(tuple(self._pending))
             except Full:
+                # Live monitoring is best-effort and must never stall the 1 kHz disk logger.
                 self.dropped_batches += 1
             self._pending.clear()
 
@@ -100,7 +101,6 @@ class LiveClient:
         if not self._closing.is_set():
             self._enqueue()
             self._closing.set()
-            # Give pending batches one request timeout, then discard the backlog.
             self._thread.join(timeout=self.timeout_s + 0.1)
             self._stop.set()
             while True:
