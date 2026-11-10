@@ -55,15 +55,39 @@ class LiveClient:
             try:
                 self._queue.put_nowait(tuple(self._pending))
             except Full:
-                # Live monitoring is best-effort and must never stall the 1 kHz disk logger.
-                self.dropped_batches += 1
+                try:
+                    self._queue.get_nowait()
+                except Empty:
+                    pass
+                else:
+                    self.dropped_batches += 1
+                self._queue.put_nowait(tuple(self._pending))
             self._pending.clear()
 
-    def _run(self) -> None:
-        channels = {
-            c.name: {"unit": c.unit, "calibration_id": c.calibration_id}
-            for c in self.channels
+    def _payload(self, batch: tuple[tuple[Reading, ...], ...]) -> dict[str, object]:
+        samples = []
+        for scan in batch:
+            for channel, reading in zip(self.channels, scan):
+                value = reading.raw_volts
+                if channel.calibration is not None:
+                    value = channel.calibration.convert(value)
+                samples.append({
+                    "t": reading.timestamp.isoformat(),
+                    "channel": channel.name,
+                    "value": value if value is not None and isfinite(value) else None,
+                })
+        return {
+            "contract_version": 1,
+            "source": "daq",
+            "run_id": self.run_id,
+            "channels": {
+                c.name: {"unit": c.unit, "calibration_id": c.calibration_id}
+                for c in self.channels
+            },
+            "samples": samples,
         }
+
+    def _run(self) -> None:
         with httpx.Client(timeout=self.timeout_s, transport=self.transport, trust_env=False) as client:
             while not self._stop.is_set():
                 try:
@@ -72,25 +96,10 @@ class LiveClient:
                     if self._closing.is_set():
                         return
                     continue
-                samples = []
-                for scan in batch:
-                    for channel, reading in zip(self.channels, scan):
-                        value = reading.raw_volts
-                        if channel.calibration is not None:
-                            value = channel.calibration.convert(value)
-                        samples.append({
-                            "t": reading.timestamp.isoformat(),
-                            "channel": channel.name,
-                            "value": value if value is not None and isfinite(value) else None,
-                        })
                 try:
-                    response = client.post(self.ingest_url.rstrip("/") + "/ingest", json={
-                        "contract_version": 1,
-                        "source": "daq",
-                        "run_id": self.run_id,
-                        "channels": channels,
-                        "samples": samples,
-                    })
+                    response = client.post(
+                        self.ingest_url.rstrip("/") + "/ingest", json=self._payload(batch),
+                    )
                     response.raise_for_status()
                 except httpx.HTTPError:
                     self.failed_batches += 1

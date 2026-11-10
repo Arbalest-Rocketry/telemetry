@@ -127,8 +127,10 @@ def test_live_payload_matches_contract() -> None:
 def test_full_queue_drops_without_delaying_disk_log(tmp_path: Path) -> None:
     entered = Event()
     release = Event()
+    messages = []
 
     def stalled(request: httpx.Request) -> httpx.Response:
+        messages.append(json.loads(request.content))
         entered.set()
         assert release.wait(5.0)
         return httpx.Response(204)
@@ -157,6 +159,10 @@ def test_full_queue_drops_without_delaying_disk_log(tmp_path: Path) -> None:
     finally:
         release.set()
         live.close()
+    assert live.sent_batches == 2
+    assert [message["samples"][0]["t"] for message in messages] == [
+        scans[0][0].timestamp.isoformat(), scans[-1][0].timestamp.isoformat(),
+    ]
 
 
 @pytest.mark.parametrize("failure", ["timeout", "connection", "status"])
