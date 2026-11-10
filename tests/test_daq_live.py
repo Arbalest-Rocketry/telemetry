@@ -247,7 +247,8 @@ def test_record_cli_with_live_ingest(tmp_path: Path) -> None:
             result = subprocess.run(
                 [sys.executable, "-m", "daq.record", "--mock", "--seconds", "0.2",
                  "--out", str(tmp_path), "--ingest-url",
-                 f"http://127.0.0.1:{server.server_port}", "--live-rate-hz", "50"],
+                 f"http://127.0.0.1:{server.server_port}", "--live-rate-hz", "50",
+                 "--live-transport", "http"],
                 check=True, capture_output=True, text=True, timeout=10,
             )
         finally:

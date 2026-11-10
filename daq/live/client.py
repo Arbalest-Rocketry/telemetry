@@ -55,6 +55,7 @@ class LiveClient:
             try:
                 self._queue.put_nowait(tuple(self._pending))
             except Full:
+                # Live view is best-effort: keep the newest data and never stall the 1 kHz disk logger.
                 try:
                     self._queue.get_nowait()
                 except Empty:

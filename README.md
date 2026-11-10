@@ -74,7 +74,8 @@ It prints the run folder with `raw.csv` and `meta.json`. Each CSV row has `t_s`,
 remaining samples before closing the log.
 
 For live monitoring, I add `--ingest-url http://localhost:8000 --live-rate-hz 25`.
-It posts averaged scans to `/ingest` in batches of five. Whole scan windows keep
+It sends averaged scans over WebSocket to `/ingest/ws` in batches of five by default.
+I add `--live-transport http` for POST `/ingest` instead. Whole scan windows keep
 the live rate at or below the requested rate; timestamps mark the window midpoint.
 A missing reading makes that channel's window `null`. Incomplete windows are
 discarded at the end. Pressure is sent in PSI; uncalibrated channels stay in volts.
@@ -83,4 +84,5 @@ batches 0.6 s to finish on shutdown. The full-rate disk log keeps going either w
 
 For the GUI, I run `./.venv/bin/python -m daq.gui --mock`, then Connect and Start Recording.
 Runs go under `data/runs`; I can add an ingest URL in the sidebar. Load cells stay in volts until calibrated.
+I can pick `ws` (default) or `http` beside the ingest URL before connecting.
 For a screenshot, I run `QT_QPA_PLATFORM=offscreen ./.venv/bin/python -m daq.gui --mock --screenshot /tmp/daq.png --after 2`.

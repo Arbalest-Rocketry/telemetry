@@ -12,13 +12,14 @@ import pyqtgraph as pg
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QApplication, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QApplication, QComboBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QPushButton, QVBoxLayout, QWidget,
 )
 
 from daq.acquire.mock import MockSource
 from daq.live.client import LiveClient
 from daq.live.downsample import Downsampler
+from daq.live.websocket import WebSocketClient
 from daq.log.writer import DiskLogger
 from daq.models import CHANNELS, Reading
 
@@ -28,6 +29,7 @@ class Acquisition:
     source: MockSource
     out: Path
     ingest_url: str
+    live_transport: str = "ws"
     samples: Queue[tuple[Reading, ...]] = field(default_factory=lambda: Queue(maxsize=8))
     messages: Queue[tuple[str, str]] = field(default_factory=Queue)
     commands: Queue[str] = field(default_factory=Queue)
@@ -42,9 +44,10 @@ class Acquisition:
         live = None
         downsampler = Downsampler(self.source.sample_rate_hz)
         run_id = uuid4().hex
+        client_type = WebSocketClient if self.live_transport == "ws" else LiveClient
         try:
             if self.ingest_url:
-                live = LiveClient(self.ingest_url, run_id, self.source.sample_rate_hz)
+                live = client_type(self.ingest_url, run_id, self.source.sample_rate_hz)
             for scan in self.source.stream(self.stop):
                 try:
                     command = self.commands.get_nowait()
@@ -54,7 +57,7 @@ class Acquisition:
                     run_id = uuid4().hex
                     if live is not None:
                         live.close()
-                        live = LiveClient(self.ingest_url, run_id, self.source.sample_rate_hz)
+                        live = client_type(self.ingest_url, run_id, self.source.sample_rate_hz)
                     try:
                         logger = DiskLogger(
                             self.out / run_id, run_id, scan[0].timestamp,
@@ -161,6 +164,10 @@ class DaqWindow(QMainWindow):
         self.ingest_url = QLineEdit(ingest_url)
         self.ingest_url.setPlaceholderText("http://localhost:8000")
         controls.addWidget(self.ingest_url)
+        controls.addWidget(QLabel("Live transport"))
+        self.live_transport = QComboBox()
+        self.live_transport.addItems(("ws", "http"))
+        controls.addWidget(self.live_transport)
         self.connect_button = QPushButton("Connect")
         self.connect_button.clicked.connect(self.connect_source)
         controls.addWidget(self.connect_button)
@@ -189,10 +196,14 @@ class DaqWindow(QMainWindow):
         if not self.mock:
             self.status.setText("No hardware adapter yet. Launch with --mock.")
             return
-        self.acquisition = Acquisition(MockSource(), self.out, self.ingest_url.text().strip())
+        self.acquisition = Acquisition(
+            MockSource(), self.out, self.ingest_url.text().strip(),
+            self.live_transport.currentText(),
+        )
         self.acquisition.thread.start()
         self.connect_button.setEnabled(False)
         self.ingest_url.setEnabled(False)
+        self.live_transport.setEnabled(False)
         self.start_button.setEnabled(True)
         self.status.setText("Connected / MOCK / 1 kHz")
 

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from daq.acquire.mock import MockSource
 from daq.live.client import LiveClient
+from daq.live.websocket import WebSocketClient
 from daq.log.writer import DiskLogger
 
 
@@ -16,6 +17,7 @@ def main() -> None:
     parser.add_argument("--seconds", type=float, default=2.0)
     parser.add_argument("--out", type=Path, default=Path("data/runs"))
     parser.add_argument("--ingest-url", help="Ingest service base URL")
+    parser.add_argument("--live-transport", choices=("ws", "http"), default="ws")
     parser.add_argument("--live-rate-hz", type=float, default=25.0)
     args = parser.parse_args()
     source = MockSource()
@@ -25,8 +27,9 @@ def main() -> None:
         parser.error("--live-rate-hz must be positive and no greater than the acquisition rate")
     run_id = uuid4().hex
     run_dir = args.out / run_id
+    client_type = WebSocketClient if args.live_transport == "ws" else LiveClient
     with ExitStack() as stack:
-        live = stack.enter_context(LiveClient(
+        live = stack.enter_context(client_type(
             args.ingest_url, run_id, source.sample_rate_hz, args.live_rate_hz,
         )) if args.ingest_url else None
         logger = stack.enter_context(DiskLogger(

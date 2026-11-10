@@ -5,14 +5,19 @@ from datetime import datetime, timedelta, timezone
 from itertools import islice
 from pathlib import Path
 import socket
+import subprocess
+import sys
 from threading import Event, Thread
 import time
 from typing import NoReturn
 
 import pytest
 import uvicorn
+from PySide6.QtWidgets import QApplication
+from starlette.types import Receive, Scope, Send
 
 from daq.acquire.mock import MockSource
+from daq.gui import DaqWindow
 from daq.live.client import LiveClient
 from daq.live.websocket import WebSocketClient
 from daq.log.writer import DiskLogger
@@ -34,6 +39,7 @@ def wait_for(condition: Callable[[], bool], timeout: float = 3.0) -> None:
 @dataclass
 class IngestServer:
     store: InMemoryStore = field(default_factory=InMemoryStore)
+    paths: list[str] = field(default_factory=list)
     port: int = 0
     _server: uvicorn.Server = field(init=False)
     _thread: Thread = field(init=False)
@@ -47,8 +53,15 @@ class IngestServer:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("127.0.0.1", self.port))
         self.port = sock.getsockname()[1]
+        app = create_app(self.store)
+
+        async def track(scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] in ("http", "websocket"):
+                self.paths.append(scope["path"])
+            await app(scope, receive, send)
+
         self._server = uvicorn.Server(uvicorn.Config(
-            create_app(self.store), log_level="error", lifespan="off",
+            track, log_level="error", lifespan="off",
             ws="websockets-sansio", timeout_graceful_shutdown=0.2,
         ))
         self._thread = Thread(target=self._server.run, kwargs={"sockets": [sock]}, daemon=True)
@@ -69,6 +82,47 @@ def server() -> Iterator[IngestServer]:
         yield server
     finally:
         server.stop()
+
+
+def test_record_cli_defaults_to_websocket(server: IngestServer, tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "daq.record", "--mock", "--seconds", "0.2",
+         "--out", str(tmp_path), "--ingest-url", server.url, "--live-rate-hz", "50"],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    run_dir = Path(result.stdout.strip())
+    with (run_dir / "raw.csv").open(newline="") as raw:
+        assert len(list(csv.DictReader(raw))) == 200
+    assert server.paths == ["/ingest/ws"]
+    assert len(server.store.batches) == 2
+    assert all(batch.run_id == run_dir.name for batch in server.store.batches)
+    assert all(len(batch.samples) == 55 for batch in server.store.batches)
+
+
+@pytest.mark.parametrize("transport", ["ws", "http"])
+def test_gui_live_transport_survives_recording_start(
+    server: IngestServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transport: str,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    window = DaqWindow(mock=True, out=tmp_path, ingest_url=server.url)
+    try:
+        assert window.live_transport.currentText() == "ws"
+        window.live_transport.setCurrentText(transport)
+        window.connect_button.click()
+        assert not window.live_transport.isEnabled()
+        wait_for(lambda: bool(server.store.batches))
+        monitoring_run = server.store.batches[0].run_id
+        window.start_button.click()
+        wait_for(lambda: any(batch.run_id != monitoring_run for batch in server.store.batches))
+        app.processEvents()
+    finally:
+        window.close()
+    assert set(server.paths) == {"/ingest/ws" if transport == "ws" else "/ingest"}
+    run_dir, = tmp_path.iterdir()
+    assert any(batch.run_id == run_dir.name for batch in server.store.batches)
+    with (run_dir / "raw.csv").open(newline="") as raw:
+        assert len(list(csv.DictReader(raw))) >= 200
 
 
 def test_websocket_sends_same_downsampled_batches_as_http(server: IngestServer) -> None:
