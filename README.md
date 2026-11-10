@@ -54,3 +54,13 @@ tools/fake_source.py simulated source for development and dry runs
 docker-compose.yml   starts the laptop stack
 tests/
 ```
+
+For a local mock recording, I run:
+
+```sh
+./.venv/bin/python -m daq.record --mock --seconds 2 --out data/runs
+```
+
+It prints the run folder with `raw.csv` and `meta.json`. Each CSV row has `t_s`,
+`timestamp_utc`, and raw volts for all 11 channels at 1 kHz. Ctrl+C flushes the
+remaining samples before closing the log.
