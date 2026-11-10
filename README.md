@@ -55,6 +55,8 @@ docker-compose.yml   starts the laptop stack
 tests/
 ```
 
+## DAQ
+
 For a local mock recording, I run:
 
 ```sh
@@ -72,3 +74,7 @@ A missing reading makes that channel's window `null`. Incomplete windows are
 discarded at the end. Pressure is sent in PSI; uncalibrated channels stay in volts.
 The sender drops batches if its queue fills or a request fails, and gives pending
 batches 0.6 s to finish on shutdown. The full-rate disk log keeps going either way.
+
+For the GUI, I run `./.venv/bin/python -m daq.gui --mock`, then Connect and Start Recording.
+Runs go under `data/runs`; I can add an ingest URL in the sidebar. Load cells stay in volts until calibrated.
+For a screenshot, I run `QT_QPA_PLATFORM=offscreen ./.venv/bin/python -m daq.gui --mock --screenshot /tmp/daq.png --after 2`.
