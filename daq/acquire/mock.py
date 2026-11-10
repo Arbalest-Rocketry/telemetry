@@ -17,6 +17,8 @@ class MockSource:
     start_utc: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     # 1 kHz matches the PT2400's ~1 ms response and the logger's full-rate target.
     sample_rate_hz: ClassVar[int] = 1000
+    # Forced volts per channel (None = failed read), for exercising faults and abort.
+    overrides: dict[str, float | None] = field(default_factory=dict)
     _random: Random = field(init=False, repr=False)
     _scan_index: int = field(default=0, init=False, repr=False)
 
@@ -31,13 +33,16 @@ class MockSource:
         t_s = self._scan_index / self.sample_rate_hz
         readings = []
         for i, channel in enumerate(CHANNELS):
-            level = 0.5 + 0.4 * sin(2 * pi * 0.5 * t_s + i)
+            # Peaks near 4300 PSI, under the 4500 PSI abort.
+            level = 0.5 + 0.35 * sin(2 * pi * 0.5 * t_s + i)
             level += self._random.uniform(-0.01, 0.01)
             if i < len(PRESSURE_CHANNELS):
                 volts = PT2400_CALIBRATION.v_zero + PT2400_CALIBRATION.v_span * level
             else:
                 # Example InAmp output: 1.25 V offset, 2 mV/V * 5 V * gain 201.
                 volts = 1.25 + 2.01 * level
+            if channel.name in self.overrides:
+                volts = self.overrides[channel.name]
             readings.append(Reading(channel.name, timestamp, volts))
         self._scan_index += 1
         return tuple(readings)

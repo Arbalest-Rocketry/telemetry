@@ -93,3 +93,14 @@ def test_mock_stream_stops_from_another_thread() -> None:
         thread.join(timeout=2.0)
     assert not thread.is_alive()
     assert list(source.stream(stop)) == []
+
+
+def test_mock_overrides_force_fault_and_overpressure_volts() -> None:
+    source = MockSource(seed=42, start_utc=START)
+    source.overrides = {"pressure_1": None, "pressure_2": 2.3, "pressure_3": 0.05}
+    scan, = source.generate(1)
+    assert [reading.raw_volts for reading in scan[:3]] == [None, 2.3, 0.05]
+    assert 0.472 <= scan[3].raw_volts <= 2.360
+    source.overrides.clear()
+    scan, = source.generate(1)
+    assert all(0.472 <= reading.raw_volts <= 2.360 for reading in scan[:6])
