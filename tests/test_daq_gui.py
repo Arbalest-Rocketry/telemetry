@@ -1,6 +1,5 @@
 from collections.abc import Callable, Iterator
 import csv
-from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -67,10 +66,11 @@ def read_run(run_dir: Path) -> list[dict[str, str]]:
     assert meta["sample_rate_hz"] == 1000
     assert meta["channels"]["pressure_1"]["unit"] == "PSI"
     with (run_dir / "raw.csv").open(newline="") as raw:
-        rows = list(csv.DictReader(raw))
+        reader = csv.DictReader(raw)
+        assert reader.fieldnames == ["t_s", *(c.name for c in CHANNELS)]
+        rows = list(reader)
     assert len(rows) >= 100
     assert float(rows[0]["t_s"]) == 0
-    assert datetime.fromisoformat(rows[0]["timestamp_utc"]) == datetime.fromisoformat(meta["start_utc"])
     assert [float(row["t_s"]) for row in rows] == pytest.approx(np.arange(len(rows)) / 1000)
     assert all(0.472 < float(row["pressure_1"]) < 2.36 for row in rows)
     return rows

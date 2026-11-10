@@ -28,22 +28,21 @@ def test_full_rate_mock_log(tmp_path: Path) -> None:
 
     with (run_dir / "raw.csv").open(newline="") as raw:
         reader = csv.DictReader(raw)
-        assert reader.fieldnames == ["t_s", "timestamp_utc", *(c.name for c in CHANNELS)]
+        assert reader.fieldnames == ["t_s", *(c.name for c in CHANNELS)]
         rows = list(reader)
+    meta = json.loads((run_dir / "meta.json").read_text())
+    start = datetime.fromisoformat(meta["start_utc"])
     assert len(rows) == 10_000
     for i, row in enumerate(rows):
-        timestamp = datetime.fromisoformat(row["timestamp_utc"])
-        assert timestamp.utcoffset() == timedelta(0)
-        assert timestamp == START + timedelta(milliseconds=i)
+        timestamp = start + timedelta(seconds=float(row["t_s"]))
+        assert timestamp == scans[i][0].timestamp
         assert float(row["t_s"]) == pytest.approx(i / 1000)
         assert [float(row[c.name]) for c in CHANNELS] == [r.raw_volts for r in scans[i]]
 
-    meta = json.loads((run_dir / "meta.json").read_text())
     assert meta["contract_version"] == 1
     assert meta["source"] == "daq"
     assert meta["run_id"] == "test-run"
     assert meta["sample_rate_hz"] == 1000
-    start = datetime.fromisoformat(meta["start_utc"])
     assert start == START
     assert start.utcoffset() == timedelta(0)
     assert list(meta["channels"]) == [c.name for c in CHANNELS]

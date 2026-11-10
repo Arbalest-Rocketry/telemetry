@@ -35,7 +35,7 @@ class DiskLogger:
         names = [channel.name for channel in self.channels]
         if not names or len(set(names)) != len(names):
             raise ValueError("channels must be nonempty and unique")
-        if {"t_s", "timestamp_utc"}.intersection(names):
+        if "t_s" in names:
             raise ValueError("Channel name conflicts with a timestamp column")
         self.start_utc = self.start_utc.astimezone(timezone.utc)
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -67,13 +67,12 @@ class DiskLogger:
                     }, meta, indent=2)
                     meta.write("\n")
                 writer = csv.writer(raw)
-                writer.writerow(["t_s", "timestamp_utc", *channels])
+                writer.writerow(["t_s", *channels])
                 self._ready.set()
                 while (scan := self._queue.get()) is not None:
                     timestamp = scan[0].timestamp
                     writer.writerow([
                         (timestamp - self.start_utc).total_seconds(),
-                        timestamp.isoformat(),
                         *(reading.raw_volts for reading in scan),
                     ])
         except Exception as error:

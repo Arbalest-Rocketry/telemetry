@@ -69,9 +69,9 @@ For a local mock recording, I run:
 ./.venv/bin/python -m daq.record --mock --seconds 2 --out data/runs
 ```
 
-It prints the run folder with `raw.csv` and `meta.json`. Each CSV row has `t_s`,
-`timestamp_utc`, and raw volts for all 11 channels at 1 kHz. Ctrl+C flushes the
-remaining samples before closing the log.
+It prints the run folder with `raw.csv` and `meta.json`. Each CSV row has `t_s`
+and raw volts for all 11 channels at 1 kHz. I get UTC by adding `t_s` seconds to
+`start_utc` in `meta.json`. Ctrl+C flushes the remaining samples before closing the log.
 
 For live monitoring, I add `--ingest-url http://localhost:8000 --live-rate-hz 25`.
 It sends averaged scans over WebSocket to `/ingest/ws` in batches of five by default.

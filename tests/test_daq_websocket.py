@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 import csv
 from datetime import datetime, timedelta, timezone
 from itertools import islice
+import json
 from pathlib import Path
 import socket
 import subprocess
@@ -195,12 +196,14 @@ def test_disconnect_keeps_full_rate_log_and_reconnects(
     assert len(server.store.batches) > accepted_before
     assert server.store.batches[-1].samples[-1].t > START + timedelta(seconds=1.5)
     assert live.failed_batches >= 1
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    start = datetime.fromisoformat(meta["start_utc"])
     with (tmp_path / "raw.csv").open(newline="") as raw:
         rows = list(csv.DictReader(raw))
     assert len(rows) == len(scans) == 2000
     for i, (row, scan) in enumerate(zip(rows, scans)):
         assert float(row["t_s"]) == i / 1000
-        assert datetime.fromisoformat(row["timestamp_utc"]) == scan[0].timestamp
+        assert start + timedelta(seconds=float(row["t_s"])) == scan[0].timestamp
         assert [float(row[r.channel]) for r in scan] == [r.raw_volts for r in scan]
 
 
