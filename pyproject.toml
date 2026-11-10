@@ -1,0 +1,6 @@
+[project]
+name = "telemetry"
+version = "0.0.0"
+description = "Unified telemetry pipeline: ingest, storage and dashboards."
+requires-python = ">=3.11"
+dependencies = []   # added as each part is implemented

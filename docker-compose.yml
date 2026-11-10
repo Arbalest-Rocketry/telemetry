@@ -1,0 +1,25 @@
+# Site-laptop stack: one command to start everything needed on test day.
+# Rough scaffold: image versions are not pinned yet and credentials are placeholders.
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: telemetry
+      POSTGRES_PASSWORD: telemetry
+      POSTGRES_DB: telemetry
+    ports: ["5432:5432"]
+    volumes:
+      - tsdb:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3000:3000"]
+    volumes:
+      - ./grafana:/var/lib/grafana/dashboards:ro
+    depends_on: [timescaledb]
+
+  # TODO: ingest service (built from ./ingest) once it is implemented
+
+volumes:
+  tsdb:

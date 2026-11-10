@@ -1,0 +1,4 @@
+-- TimescaleDB tables. Loaded automatically on first start (see docker-compose.yml).
+-- TODO: live samples table (time, source, run_id, channel, value)
+-- TODO: runs table (run_id, started, ended)
+-- TODO: gold summary table (one row per test)
