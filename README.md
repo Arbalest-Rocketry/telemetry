@@ -86,3 +86,37 @@ For the GUI, I run `./.venv/bin/python -m daq.gui --mock`, then Connect and Star
 Runs go under `data/runs`; I can add an ingest URL in the sidebar. Load cells stay in volts until calibrated.
 I can pick `ws` (default) or `http` beside the ingest URL before connecting.
 For a screenshot, I run `QT_QPA_PLATFORM=offscreen ./.venv/bin/python -m daq.gui --mock --screenshot /tmp/daq.png --after 2`.
+
+### Stand control
+
+The GUI has a control column: Emergency Abort, Reset Abort, the seven test states,
+and a toggle per valve. Each valve shows what I commanded next to what the PLC
+read back. With `--mock` the window starts its own fake PLC (Modbus TCP on
+localhost), so nothing leaves this machine. Writing to the real PLC isn't wired up yet.
+
+Valves are coils 0 to 6 on unit 1: LOX Dump, Fuel Dump, LOX Fill, LOX Run,
+Fuel Run, LOX Vent, Fuel Vent. Every command is written, then read back.
+If the PLC is down, the latest mask waits and goes out on reconnect, and the
+status line under the valves says so.
+
+| State | Open |
+| --- | --- |
+| IDLE, PRESSURIZATION, READY | none |
+| FILLING | LOX Fill, LOX Vent, Fuel Vent |
+| TEST | LOX Run, Fuel Run |
+| SAFE, ABORT | both dumps, both vents |
+
+Rules:
+
+- LOX Run and LOX Fill never open together. Fill closes.
+- ABORT latches. The only way out is SAFE, and only once every watched PT is
+  at or below 50 PSI. An unknown pressure also blocks the reset.
+- In ABORT, Run and Fill toggles are locked. Dumps and vents still toggle.
+- Auto-abort trips when a watched PT goes above 4500 PSI, or when its reads are
+  missing, stale, or outside 0.1 to 4.9 V for more than 0.25 s. It runs on its
+  own thread off the acquisition data, and the alert is a label, not a dialog,
+  so logging and plots keep going.
+
+The thresholds, watched PTs (all six for now), and PLC address live in
+`daq/control/config.py`. The 50 PSI reset limit and 0.25 s window are
+placeholders until the team picks real ones.
