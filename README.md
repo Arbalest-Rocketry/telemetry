@@ -57,6 +57,12 @@ tests/
 
 ## DAQ
 
+For local ingest, I run `./.venv/bin/python -m ingest.app` on port 8000.
+`POST /ingest` and `/ingest/ws` take the same v1 live batches and reply with
+`{"accepted": <sample count>}`. Bad HTTP batches get 422; bad WebSocket batches
+get `{"error": "..."}` and I can keep sending on the same connection.
+Storage is in memory for now, so restarting clears it. TimescaleDB is still TODO.
+
 For a local mock recording, I run:
 
 ```sh
